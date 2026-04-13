@@ -626,9 +626,16 @@
   }
 
   async function bulkAction(action) {
-    const targets = allContainers.filter(c =>
-      action === 'start' ? c.state !== 'running' : c.state === 'running'
-    );
+    // Detect self-container by matching the current page port to an exposed port,
+    // so Stop All never kills the launchpad server mid-operation.
+    const selfPort = parseInt(window.location.port || (window.location.protocol === 'https:' ? 443 : 80));
+    const selfId   = (allContainers.find(c => c.ports.some(p => p.hostPort === selfPort)) || {}).id;
+
+    const targets = allContainers.filter(c => {
+      if (c.id === selfId) return false;
+      return action === 'start' ? c.state !== 'running' : c.state === 'running';
+    });
+
     if (targets.length === 0) {
       showToast(`No containers to ${action}`, '');
       return;
@@ -639,24 +646,32 @@
     startBtn.disabled = true;
     stopBtn.disabled  = true;
 
-    const results = await Promise.allSettled(
-      targets.map(c =>
-        fetch(`/api/containers/${c.id}/${action}`, { method: 'POST' }).then(r => {
-          if (!r.ok) return r.json().then(e => Promise.reject(new Error(e.error)));
-        })
-      )
-    );
+    try {
+      const results = await Promise.allSettled(
+        targets.map(c =>
+          fetch(`/api/containers/${c.id}/${action}`, { method: 'POST' }).then(r => {
+            if (!r.ok) return r.json().then(e => Promise.reject(new Error(e.error)));
+          })
+        )
+      );
 
-    const errors = results.filter(r => r.status === 'rejected').length;
-    if (errors > 0)
-      showToast(`Done — ${errors} error${errors > 1 ? 's' : ''}`, 'error');
-    else
-      showToast(`All ${action === 'start' ? 'started' : 'stopped'} (${targets.length})`, 'success');
+      const failed = results.filter(r => r.status === 'rejected');
+      if (failed.length > 0) {
+        const first = failed[0].reason?.message || 'unknown error';
+        const suffix = failed.length > 1 ? ` (+${failed.length - 1} more)` : '';
+        showToast(`${first}${suffix}`, 'error');
+      } else {
+        showToast(`All ${action === 'start' ? 'started' : 'stopped'} (${targets.length})`, 'success');
+      }
 
-    await Promise.all([loadContainers(), loadGroups()]);
-    renderView();
-    startBtn.disabled = false;
-    stopBtn.disabled  = false;
+      await Promise.all([loadContainers(), loadGroups()]);
+      renderView();
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      startBtn.disabled = false;
+      stopBtn.disabled  = false;
+    }
   }
 
   // ── Groups tab ──────────────────────────────────────────────────────────────
@@ -724,8 +739,11 @@
       const res = await fetch(`/api/groups/${id}/${action}`, { method: 'POST' });
       if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Failed'); }
       const data = await res.json();
-      if (data.errors && data.errors.length > 0)
-        showToast(`Done (${data.errors.length} error${data.errors.length > 1 ? 's' : ''})`, 'error');
+      if (data.errors && data.errors.length > 0) {
+        const first = data.errors[0] || 'unknown error';
+        const suffix = data.errors.length > 1 ? ` (+${data.errors.length - 1} more)` : '';
+        showToast(`${first}${suffix}`, 'error');
+      }
       else
         showToast(`Group ${action === 'start' ? 'started' : 'stopped'}`, 'success');
       await Promise.all([loadContainers(), loadGroups()]);
