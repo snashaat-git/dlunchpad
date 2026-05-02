@@ -306,6 +306,23 @@
   .member-dot.running { background: var(--green); }
   .member-dot.stopped { background: #444c56; }
 
+  /* ── Pinned / always-running ── */
+  .pinned-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: var(--yellow-dim); border: 1px solid #5a3e10; color: var(--yellow);
+    font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 20px;
+    letter-spacing: 0.05em; white-space: nowrap;
+  }
+
+  .group-card.pinned::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0;
+    height: 2px; background: var(--yellow);
+  }
+
+  .card-btn.locked {
+    background: #1c1c0e; border-color: #3a3010; color: #666; cursor: not-allowed;
+  }
+
   /* ── Empty state ── */
   .empty-state {
     text-align: center; padding: 60px 20px; color: var(--text-muted);
@@ -478,6 +495,15 @@
       <input class="modal-input" id="groupNameInput" type="text" placeholder="e.g. Dev Stack" oninput="validateModal()">
     </div>
 
+    <div class="modal-field">
+      <label class="modal-label">Protection</label>
+      <label class="checkbox-item" style="border:1px solid var(--border);border-radius:8px;padding:10px 14px">
+        <input type="checkbox" id="pinnedToggle">
+        <span class="checkbox-label">Always Running</span>
+        <span class="checkbox-state" style="color:var(--yellow)">Cannot be stopped by this app</span>
+      </label>
+    </div>
+
     <div class="modal-field" style="flex:1;display:flex;flex-direction:column">
       <label class="modal-label">Containers</label>
       <div class="checkbox-list" id="checkboxList"></div>
@@ -584,9 +610,10 @@
         ).join('')}</div>`
       : '';
 
-    const btnClass = isRunning ? 'stop' : 'start';
-    const btnLabel = isRunning ? '&#x25A0; Stop' : '&#x25B6; Start';
-    const action   = isRunning ? 'stop' : 'start';
+    const isPinned  = isRunning && allGroups.some(g => g.pinned && g.containerIds.includes(c.id));
+    const actionBtn = isPinned
+      ? `<button class="card-btn stop locked" disabled title="Protected — always running">&#x1F512; Protected</button>`
+      : `<button class="card-btn ${isRunning ? 'stop' : 'start'}" onclick="toggleContainer('${c.id}', '${isRunning ? 'stop' : 'start'}', this)">${isRunning ? '&#x25A0; Stop' : '&#x25B6; Start'}</button>`;
 
     return `
       <div class="card ${stateClass}" data-id="${c.id}">
@@ -597,7 +624,7 @@
         <div class="card-image" title="${c.image}">${c.image}</div>
         <div class="card-status ${stateClass}">${c.status}</div>
         ${portsHTML}
-        <button class="card-btn ${btnClass}" onclick="toggleContainer('${c.id}', '${action}', this)">${btnLabel}</button>
+        ${actionBtn}
       </div>`;
   }
 
@@ -631,8 +658,10 @@
     const selfPort = parseInt(window.location.port || (window.location.protocol === 'https:' ? 443 : 80));
     const selfId   = (allContainers.find(c => c.ports.some(p => p.hostPort === selfPort)) || {}).id;
 
+    const pinnedIds = new Set(allGroups.filter(g => g.pinned).flatMap(g => g.containerIds));
     const targets = allContainers.filter(c => {
       if (c.id === selfId) return false;
+      if (action === 'stop' && pinnedIds.has(c.id)) return false;
       return action === 'start' ? c.state !== 'running' : c.state === 'running';
     });
 
@@ -710,8 +739,12 @@
       </span>`;
     }).join('');
 
+    const stopBtn = g.pinned
+      ? `<span class="pinned-badge">&#x1F512; Always Running</span>`
+      : `<button class="group-action-btn stop-all" onclick="groupAction('${g.id}', 'stop', this)">&#x25A0; Stop All</button>`;
+
     return `
-      <div class="group-card" data-gid="${g.id}">
+      <div class="group-card${g.pinned ? ' pinned' : ''}" data-gid="${g.id}">
         <div class="group-card-top">
           <div class="group-title">
             <span class="group-status-dot ${dotClass}"></span>
@@ -720,7 +753,7 @@
           </div>
           <div class="group-actions">
             <button class="group-action-btn start-all" onclick="groupAction('${g.id}', 'start', this)">&#x25B6; Start All</button>
-            <button class="group-action-btn stop-all"  onclick="groupAction('${g.id}', 'stop',  this)">&#x25A0; Stop All</button>
+            ${stopBtn}
             <button class="icon-btn" title="Edit" onclick="openModal('${g.id}')">&#x270F;</button>
             <button class="icon-btn delete" title="Delete" onclick="deleteGroup('${g.id}', this)">&#x1F5D1;</button>
           </div>
@@ -778,6 +811,7 @@
 
     document.getElementById('modalTitle').textContent = group ? 'Edit Group' : 'New Group';
     document.getElementById('groupNameInput').value   = group ? group.name : '';
+    document.getElementById('pinnedToggle').checked   = group ? !!group.pinned : false;
 
     // Build checkbox list
     const list = document.getElementById('checkboxList');
@@ -815,6 +849,7 @@
   async function saveGroup() {
     const name = document.getElementById('groupNameInput').value.trim();
     const containerIds = [...document.querySelectorAll('#checkboxList input:checked')].map(i => i.value);
+    const pinned = document.getElementById('pinnedToggle').checked;
 
     const saveBtn = document.getElementById('saveBtn');
     saveBtn.disabled = true;
@@ -826,7 +861,7 @@
       const res = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, containerIds }),
+        body: JSON.stringify({ name, containerIds, pinned }),
       });
       if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Save failed'); }
       showToast(editingGroupId ? 'Group updated' : 'Group created', 'success');

@@ -87,11 +87,11 @@ app.get('/api/groups', async (req, res) => {
 
 app.post('/api/groups', async (req, res) => {
   try {
-    const { name, containerIds } = req.body;
+    const { name, containerIds, pinned } = req.body;
     if (!name || !Array.isArray(containerIds) || containerIds.length === 0)
       return res.status(400).json({ error: 'name and containerIds required' });
     const groups = await readGroups();
-    const group = { id: crypto.randomUUID(), name, containerIds };
+    const group = { id: crypto.randomUUID(), name, containerIds, pinned: !!pinned };
     groups.push(group);
     await writeGroups(groups);
     res.json(group);
@@ -102,12 +102,13 @@ app.post('/api/groups', async (req, res) => {
 
 app.put('/api/groups/:id', async (req, res) => {
   try {
-    const { name, containerIds } = req.body;
+    const { name, containerIds, pinned } = req.body;
     const groups = await readGroups();
     const idx = groups.findIndex(g => g.id === req.params.id);
     if (idx === -1) return res.status(404).json({ error: 'Group not found' });
     if (name) groups[idx].name = name;
     if (Array.isArray(containerIds)) groups[idx].containerIds = containerIds;
+    if (typeof pinned === 'boolean') groups[idx].pinned = pinned;
     await writeGroups(groups);
     res.json(groups[idx]);
   } catch (err) {
@@ -153,6 +154,7 @@ app.post('/api/groups/:id/stop', async (req, res) => {
     const groups = await readGroups();
     const group = groups.find(g => g.id === req.params.id);
     if (!group) return res.status(404).json({ error: 'Group not found' });
+    if (group.pinned) return res.status(403).json({ error: 'Group is protected and cannot be stopped' });
     const results = await Promise.allSettled(
       group.containerIds.map(id =>
         docker.getContainer(id).stop().catch(err => {
