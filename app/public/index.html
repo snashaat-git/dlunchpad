@@ -610,7 +610,7 @@
         ).join('')}</div>`
       : '';
 
-    const isPinned  = isRunning && allGroups.some(g => g.pinned && g.containerIds.includes(c.id));
+    const isPinned  = isRunning && allGroups.some(g => g.pinned && g.containerIds.includes(c.name));
     const actionBtn = isPinned
       ? `<button class="card-btn stop locked" disabled title="Protected — always running">&#x1F512; Protected</button>`
       : `<button class="card-btn ${isRunning ? 'stop' : 'start'}" onclick="toggleContainer('${c.id}', '${isRunning ? 'stop' : 'start'}', this)">${isRunning ? '&#x25A0; Stop' : '&#x25B6; Start'}</button>`;
@@ -658,10 +658,10 @@
     const selfPort = parseInt(window.location.port || (window.location.protocol === 'https:' ? 443 : 80));
     const selfId   = (allContainers.find(c => c.ports.some(p => p.hostPort === selfPort)) || {}).id;
 
-    const pinnedIds = new Set(allGroups.filter(g => g.pinned).flatMap(g => g.containerIds));
+    const pinnedNames = new Set(allGroups.filter(g => g.pinned).flatMap(g => g.containerIds));
     const targets = allContainers.filter(c => {
       if (c.id === selfId) return false;
-      if (action === 'stop' && pinnedIds.has(c.id)) return false;
+      if (action === 'stop' && pinnedNames.has(c.name)) return false;
       return action === 'start' ? c.state !== 'running' : c.state === 'running';
     });
 
@@ -816,11 +816,11 @@
     // Build checkbox list
     const list = document.getElementById('checkboxList');
     list.innerHTML = allContainers.map(c => {
-      const checked = group ? group.containerIds.includes(c.id) : false;
+      const checked = group ? group.containerIds.includes(c.name) : false;
       const isRunning = c.state === 'running';
       return `
         <label class="checkbox-item">
-          <input type="checkbox" value="${c.id}" ${checked ? 'checked' : ''} onchange="validateModal()">
+          <input type="checkbox" value="${c.name}" ${checked ? 'checked' : ''} onchange="validateModal()">
           <span class="checkbox-label">${escHtml(c.name)}</span>
           <span class="checkbox-state ${isRunning ? 'running' : 'stopped'}">${isRunning ? '● running' : '○ stopped'}</span>
         </label>`;
